@@ -1,5 +1,8 @@
 # laravel-aria
 
+[![CI](https://github.com/thekiharani/laravel-aria/actions/workflows/ci.yml/badge.svg)](https://github.com/thekiharani/laravel-aria/actions/workflows/ci.yml)
+[![Packagist](https://img.shields.io/packagist/v/thekiharani/laravel-aria)](https://packagist.org/packages/thekiharani/laravel-aria)
+
 The layer between `laravel/ai` and a product: retrieval over a corpus you supply, spend
 governance, PII masking, and somewhere for a conversation to live.
 
