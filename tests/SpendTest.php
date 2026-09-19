@@ -15,7 +15,6 @@ use Laravel\Ai\Responses\Data\Usage;
 use Laravel\Ai\Responses\EmbeddingsResponse;
 use NoriaLabs\Aria\Agents\AriaAgent;
 use NoriaLabs\Aria\Contracts\BudgetPolicy;
-use NoriaLabs\Aria\Models\Conversation;
 use NoriaLabs\Aria\Models\Run;
 use NoriaLabs\Aria\Models\SpendLedger;
 use NoriaLabs\Aria\Spend\Budget;
@@ -32,7 +31,7 @@ function usage(int $prompt = 0, int $completion = 0): Usage
 function agentPrompt(string $model = 'cheap-model'): AgentPrompt
 {
     return new AgentPrompt(
-        agent: new AriaAgent(Conversation::query()->create(['corpus' => 'stub']), new StubPersona),
+        agent: new AriaAgent(new StubPersona),
         prompt: 'hello',
         attachments: [],
         provider: Ai::textProvider('openai'),

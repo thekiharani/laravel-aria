@@ -5,42 +5,67 @@ declare(strict_types=1);
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
-use NoriaLabs\Aria\Models\Conversation;
-use NoriaLabs\Aria\Models\Document;
+use NoriaLabs\Aria\Aria;
 use NoriaLabs\Aria\Support\Vectors;
 
 return new class extends Migration
 {
+    public function getConnection(): ?string
+    {
+        return Aria::connection();
+    }
+
     public function up(): void
     {
-        $prefix = (string) config('aria.table_prefix', 'aria_');
+        $conversations = Aria::table('conversations');
+        $documents = Aria::table('documents');
 
-        Schema::create($prefix.'conversations', function (Blueprint $table): void {
+        /*
+         * The conversation and message columns are the SDK's, because the
+         * SDK's ConversationStore writes and reads them. Aria adds corpus,
+         * scope and visitor_key, and replaces the SDK's bigint participant_id
+         * with a string so a host whose users have UUID keys can still name
+         * one. Renaming a column here breaks the store, not just a query.
+         */
+        Schema::create($conversations, function (Blueprint $table): void {
             $table->uuid('id')->primary();
             $table->string('scope', 64)->nullable()->index();
-            $table->string('corpus', 64)->index();
+            $table->string('corpus', 64)->nullable()->index();
+            $table->string('participant_type', 256)->nullable();
+            $table->string('participant_id', 64)->nullable();
             $table->string('visitor_key', 128)->nullable()->index();
+            $table->string('title', 256);
             $table->jsonb('meta')->nullable();
-            $table->timestamp('last_activity_at')->nullable()->index();
             $table->timestamps();
+
+            $table->index(['participant_type', 'participant_id', 'updated_at'], 'aria_conversations_participant_idx');
         });
 
-        Schema::create($prefix.'messages', function (Blueprint $table) use ($prefix): void {
+        Schema::create(Aria::table('messages'), function (Blueprint $table) use ($conversations): void {
             $table->uuid('id')->primary();
-            $table->foreignIdFor(Conversation::class)
-                ->constrained(table: $prefix.'conversations')
+            // Named explicitly rather than let foreignIdFor derive it: the
+            // SDK's store queries conversation_id, so a host swapping the
+            // model must not rename the column out from under it.
+            $table->foreignIdFor(Aria::conversationModel(), 'conversation_id')
+                ->constrained(table: $conversations)
                 ->cascadeOnDelete();
-            $table->string('role', 16);
+            $table->string('participant_type', 256)->nullable();
+            $table->string('participant_id', 64)->nullable();
+            $table->string('agent', 256);
+            $table->string('role', 32);
             $table->text('content');
-            $table->jsonb('tool_calls')->nullable();
-            $table->jsonb('tool_results')->nullable();
-            $table->jsonb('usage')->nullable();
+            $table->jsonb('attachments');
+            $table->jsonb('tool_calls');
+            $table->jsonb('tool_results');
+            $table->jsonb('usage');
+            $table->jsonb('meta');
+            $table->jsonb('approval_state')->nullable();
             $table->timestamps();
 
-            $table->index(['conversation_id', 'created_at']);
+            $table->index(['conversation_id', 'id'], 'aria_messages_window_idx');
         });
 
-        Schema::create($prefix.'documents', function (Blueprint $table): void {
+        Schema::create($documents, function (Blueprint $table): void {
             $table->uuid('id')->primary();
             $table->string('scope', 64)->nullable()->index();
             $table->string('corpus', 64);
@@ -56,10 +81,10 @@ return new class extends Migration
             $table->unique(['corpus', 'source_type', 'source_key'], 'aria_documents_source_unique');
         });
 
-        Schema::create($prefix.'chunks', function (Blueprint $table) use ($prefix): void {
+        Schema::create(Aria::table('chunks'), function (Blueprint $table) use ($documents): void {
             $table->uuid('id')->primary();
-            $table->foreignIdFor(Document::class)
-                ->constrained(table: $prefix.'documents')
+            $table->foreignIdFor(Aria::documentModel(), 'document_id')
+                ->constrained(table: $documents)
                 ->cascadeOnDelete();
             $table->string('chunk_name', 64)->default('body');
             $table->unsignedInteger('chunk_index')->default(0);
@@ -83,15 +108,15 @@ return new class extends Migration
         if (Vectors::available()) {
             $dimensions = (int) config('aria.embeddings.dimensions', 1536);
 
-            Schema::table($prefix.'chunks', function (Blueprint $table) use ($dimensions): void {
+            Schema::table(Aria::table('chunks'), function (Blueprint $table) use ($dimensions): void {
                 $table->vector('embedding', $dimensions)->nullable();
             });
         }
 
-        Schema::create($prefix.'runs', function (Blueprint $table): void {
+        Schema::create(Aria::table('runs'), function (Blueprint $table): void {
             $table->uuid('id')->primary();
             $table->string('scope', 64)->nullable()->index();
-            $table->string('agent', 128)->nullable();
+            $table->string('agent', 256)->nullable();
             $table->string('provider', 64)->nullable();
             $table->string('model', 128)->nullable();
             $table->string('status', 16)->default('succeeded');
@@ -104,7 +129,7 @@ return new class extends Migration
             $table->index(['scope', 'created_at']);
         });
 
-        Schema::create($prefix.'spend_ledger', function (Blueprint $table): void {
+        Schema::create(Aria::table('spend_ledger'), function (Blueprint $table): void {
             $table->uuid('id')->primary();
             $table->string('scope', 64)->nullable();
             $table->string('period', 8);
@@ -117,10 +142,8 @@ return new class extends Migration
 
     public function down(): void
     {
-        $prefix = (string) config('aria.table_prefix', 'aria_');
-
         foreach (['spend_ledger', 'runs', 'chunks', 'documents', 'messages', 'conversations'] as $table) {
-            Schema::dropIfExists($prefix.$table);
+            Schema::dropIfExists(Aria::table($table));
         }
     }
 };

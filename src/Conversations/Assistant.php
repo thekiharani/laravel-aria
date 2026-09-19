@@ -5,24 +5,26 @@ declare(strict_types=1);
 namespace NoriaLabs\Aria\Conversations;
 
 use Illuminate\Support\Facades\Config;
-use Laravel\Ai\Streaming\Events\StreamEnd;
+use Illuminate\Support\Str;
+use Laravel\Ai\Contracts\ConversationStore;
+use Laravel\Ai\Responses\AgentResponse;
+use Laravel\Ai\Responses\StreamableAgentResponse;
 use Laravel\Ai\Streaming\Events\TextDelta;
-use Laravel\Ai\Streaming\Events\ToolCall;
-use Laravel\Ai\Streaming\Events\ToolResult;
 use NoriaLabs\Aria\Agents\AriaAgent;
+use NoriaLabs\Aria\Contracts\Normaliser;
 use NoriaLabs\Aria\Contracts\Persona;
-use NoriaLabs\Aria\Enums\Role;
 use NoriaLabs\Aria\Exceptions\BudgetExhausted;
-use NoriaLabs\Aria\Models\Conversation;
-use NoriaLabs\Aria\Models\Message;
 use NoriaLabs\Aria\Spend\Budget;
+use NoriaLabs\Aria\Support\Masker;
 
 /**
- * Runs a turn and writes it down.
+ * Runs a turn under a budget.
  *
- * streamReply takes a callable rather than owning a transport, which is why the
- * same runner serves a Livewire island, an SSE controller and a queued job
- * without knowing which it is talking to.
+ * Persisting the turn, replaying history and resuming an approval pause are
+ * the SDK's, through RemembersConversations on the agent. What is left here
+ * is what the SDK does not do: masking before the text is stored or sent,
+ * reserving against a cap before the call, and giving the reservation back
+ * after it whatever happened.
  */
 class Assistant
 {
@@ -30,83 +32,66 @@ class Assistant
     public function __construct(
         private Persona $persona,
         private Budget $budget,
+        private Masker $masker,
+        private Normaliser $normaliser,
+        private ConversationStore $store,
         private iterable $tools = [],
     ) {}
 
-    public function reply(Conversation $conversation, string $message): Message
+    public function reply(string $message, ?string $conversationId = null, ?object $participant = null): AgentResponse
     {
-        $message = trim($message);
+        $message = $this->masker->mask(trim($message));
 
-        $this->record($conversation, Role::User, $message);
+        $agent = $this->agent($message, $conversationId, $participant);
 
         $reserved = $this->reserve($message);
 
         try {
-            $response = $this->agent($conversation)->prompt($message, provider: $this->provider());
+            $response = $agent->prompt($message, provider: $this->provider());
         } finally {
             $this->budget->refund($reserved);
         }
 
-        $assistant = $conversation->messages()->create([
-            'role' => Role::Assistant,
-            'content' => $this->normalise($response->text),
-            'usage' => $response->usage->toArray(),
-        ]);
+        $response->text = $this->normaliser->normalise($response->text);
 
-        $conversation->touchActivity();
-
-        return $assistant;
+        return $response;
     }
 
     /**
-     * Answers the conversation's trailing visitor turn, which the caller is
-     * expected to have persisted already so it renders before the stream opens.
+     * The SDK's own streamable response: iterable, Responsable, and able to
+     * speak the Vercel protocol, so a controller can return it for SSE and a
+     * Livewire island can walk it - without this package owning a transport.
      *
-     * @param  callable(string): void  $onDelta
+     * @param  (callable(string): void)|null  $onDelta
      */
-    public function streamReply(Conversation $conversation, callable $onDelta): Message
+    public function stream(string $message, ?string $conversationId = null, ?object $participant = null, ?callable $onDelta = null): StreamableAgentResponse
     {
-        $prompt = $conversation->pendingPrompt();
+        $message = $this->masker->mask(trim($message));
 
-        $reserved = $this->reserve($prompt);
+        $agent = $this->agent($message, $conversationId, $participant);
 
-        $full = '';
-        $toolCalls = [];
-        $toolResults = [];
-        $usage = null;
+        $reserved = $this->reserve($message);
 
-        try {
-            foreach ($this->agent($conversation)->stream($prompt, provider: $this->provider()) as $event) {
-                if ($event instanceof TextDelta) {
-                    $delta = $this->normalise($event->delta);
+        $response = $agent->stream($message, provider: $this->provider());
 
-                    if ($delta !== '') {
-                        $full .= $delta;
-                        $onDelta($delta);
-                    }
-                } elseif ($event instanceof ToolCall) {
-                    $toolCalls[] = $event->toArray();
-                } elseif ($event instanceof ToolResult) {
-                    $toolResults[] = $event->toArray();
-                } elseif ($event instanceof StreamEnd) {
-                    $usage = $event->usage->toArray();
-                }
-            }
-        } finally {
-            $this->budget->refund($reserved);
+        // Refunded when the stream completes. A stream the caller abandons
+        // never completes and never gives the reservation back until the
+        // period rolls, which makes the cap stricter rather than looser.
+        $response->then(fn () => $this->budget->refund($reserved));
+
+        if ($onDelta === null) {
+            return $response;
         }
 
-        $assistant = $conversation->messages()->create([
-            'role' => Role::Assistant,
-            'content' => $full,
-            'tool_calls' => $toolCalls === [] ? null : $toolCalls,
-            'tool_results' => $toolResults === [] ? null : $toolResults,
-            'usage' => $usage,
-        ]);
+        return $response->each(function (object $event) use ($onDelta): void {
+            if ($event instanceof TextDelta) {
+                $delta = $this->normaliser->normalise($event->delta);
 
-        $conversation->touchActivity();
-
-        return $assistant;
+                if ($delta !== '') {
+                    $onDelta($delta);
+                }
+            }
+        });
     }
 
     /**
@@ -121,9 +106,26 @@ class Assistant
         ];
     }
 
-    private function agent(Conversation $conversation): AriaAgent
+    /**
+     * An anonymous visitor's first turn needs a row before the SDK will keep
+     * anything: its middleware only remembers a turn that already has a
+     * conversation or a participant, and a website visitor has neither.
+     */
+    private function agent(string $message, ?string $conversationId, ?object $participant): AriaAgent
     {
-        return new AriaAgent($conversation, $this->persona, $this->tools);
+        $agent = new AriaAgent($this->persona, $this->tools);
+
+        if ($conversationId !== null) {
+            return $agent->continue($conversationId, $participant);
+        }
+
+        if ($participant !== null) {
+            return $agent->forParticipant($participant);
+        }
+
+        return $agent->continue(
+            $this->store->storeConversation(null, null, Str::limit($message, 50, preserveWords: true)),
+        );
     }
 
     /**
@@ -140,21 +142,5 @@ class Assistant
         }
 
         return $estimate;
-    }
-
-    private function record(Conversation $conversation, Role $role, string $content): Message
-    {
-        return $conversation->messages()->create(['role' => $role, 'content' => $content]);
-    }
-
-    /**
-     * Applied to everything a model returns. A product that wants smart quotes
-     * turned into straight ones sets its own normaliser here.
-     */
-    private function normalise(string $text): string
-    {
-        $normaliser = Config::get('aria.normaliser');
-
-        return is_callable($normaliser) ? (string) $normaliser($text) : $text;
     }
 }

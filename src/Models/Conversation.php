@@ -5,13 +5,19 @@ declare(strict_types=1);
 namespace NoriaLabs\Aria\Models;
 
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use NoriaLabs\Aria\Enums\Role;
+use Illuminate\Database\Eloquent\Relations\MorphTo;
+use NoriaLabs\Aria\Aria;
 
 /**
+ * The read surface over a thread. Writes during a turn belong to the SDK's
+ * ConversationStore, which also rebuilds tool calls and approval pauses into
+ * replayable messages - none of which an Eloquent relation would get right.
+ *
  * @property string $id
  * @property string|null $scope
  * @property string $corpus
  * @property string|null $visitor_key
+ * @property string $title
  */
 class Conversation extends AriaModel
 {
@@ -19,30 +25,19 @@ class Conversation extends AriaModel
 
     protected $casts = [
         'meta' => 'array',
-        'last_activity_at' => 'datetime',
     ];
 
     /** @return HasMany<Message, $this> */
     public function messages(): HasMany
     {
-        return $this->hasMany(Message::class)->orderBy('created_at')->orderBy('id');
+        return $this->hasMany(Aria::messageModel(), 'conversation_id')
+            ->orderBy('created_at')
+            ->orderBy('id');
     }
 
-    public function lastMessage(): ?Message
+    /** @return MorphTo<covariant \Illuminate\Database\Eloquent\Model, $this> */
+    public function participant(): MorphTo
     {
-        return $this->messages()->reorder()->orderByDesc('created_at')->orderByDesc('id')->first();
-    }
-
-    /** The trailing visitor turn, which is what a stream is answering. */
-    public function pendingPrompt(): string
-    {
-        $last = $this->lastMessage();
-
-        return $last?->role === Role::User ? $last->content : '';
-    }
-
-    public function touchActivity(): void
-    {
-        $this->forceFill(['last_activity_at' => now()])->save();
+        return $this->morphTo();
     }
 }

@@ -7,6 +7,7 @@ namespace NoriaLabs\Aria\Knowledge;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Config;
 use Laravel\Ai\Embeddings;
+use NoriaLabs\Aria\Aria;
 use NoriaLabs\Aria\Contracts\BudgetPolicy;
 use NoriaLabs\Aria\Contracts\KnowledgeSource;
 use NoriaLabs\Aria\Models\Chunk;
@@ -34,7 +35,7 @@ class KnowledgeIndex
         foreach ($this->source->documents() as $document) {
             $hash = $document->hash();
 
-            $existing = Document::query()
+            $existing = Aria::documentModel()::query()
                 ->where('corpus', $this->source->corpus())
                 ->where('source_type', $document->sourceType)
                 ->where('source_key', $document->sourceKey)
@@ -42,7 +43,7 @@ class KnowledgeIndex
 
             $changed = $fresh || $existing === null || $existing->source_hash !== $hash;
 
-            $model = Document::query()->updateOrCreate(
+            $model = Aria::documentModel()::query()->updateOrCreate(
                 [
                     'corpus' => $this->source->corpus(),
                     'source_type' => $document->sourceType,
@@ -137,7 +138,7 @@ class KnowledgeIndex
     /** @return Builder<Chunk> */
     private function scoped(): Builder
     {
-        return Chunk::query()
+        return Aria::chunkModel()::query()
             ->with('document')
             ->whereHas('document', fn ($d) => $d->where('corpus', $this->source->corpus()));
     }

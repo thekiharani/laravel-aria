@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace NoriaLabs\Aria\Models;
 
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use NoriaLabs\Aria\Aria;
 
 /**
  * @property string $id
@@ -22,6 +23,6 @@ class Document extends AriaModel
     /** @return HasMany<Chunk, $this> */
     public function chunks(): HasMany
     {
-        return $this->hasMany(Chunk::class);
+        return $this->hasMany(Aria::chunkModel(), 'document_id');
     }
 }

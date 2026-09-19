@@ -6,6 +6,7 @@ namespace NoriaLabs\Aria\Support;
 
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use NoriaLabs\Aria\Aria;
 use Throwable;
 
 /**
@@ -26,19 +27,19 @@ final class Vectors
             return self::$available;
         }
 
-        if (DB::connection()->getDriverName() !== 'pgsql') {
+        if (DB::connection(Aria::connection())->getDriverName() !== 'pgsql') {
             return self::$available = false;
         }
 
         try {
-            DB::statement('CREATE EXTENSION IF NOT EXISTS vector');
+            DB::connection(Aria::connection())->statement('CREATE EXTENSION IF NOT EXISTS vector');
         } catch (Throwable) {
             // No permission to install it; fall through and ask whether
             // somebody else already did.
         }
 
         try {
-            return self::$available = DB::scalar(
+            return self::$available = DB::connection(Aria::connection())->scalar(
                 "select count(*) from pg_extension where extname = 'vector'",
             ) > 0;
         } catch (Throwable) {
@@ -49,9 +50,8 @@ final class Vectors
     /** The column only exists where the extension did at migration time. */
     public static function indexed(): bool
     {
-        $table = config('aria.table_prefix', 'aria_').'chunks';
-
-        return self::available() && Schema::hasColumn($table, 'embedding');
+        return self::available()
+            && Schema::connection(Aria::connection())->hasColumn(Aria::table('chunks'), 'embedding');
     }
 
     public static function flush(): void

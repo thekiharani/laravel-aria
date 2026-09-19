@@ -8,8 +8,8 @@ use Laravel\Ai\Events\AgentFailed;
 use Laravel\Ai\Events\AgentPrompted;
 use Laravel\Ai\Events\EmbeddingsGenerated;
 use Laravel\Ai\Prompts\AgentPrompt;
+use NoriaLabs\Aria\Aria;
 use NoriaLabs\Aria\Contracts\BudgetPolicy;
-use NoriaLabs\Aria\Models\Run;
 
 /**
  * Every call the SDK makes, written down with what it cost.
@@ -82,7 +82,7 @@ class RecordRun
     /** @param array<string, mixed> $attributes */
     private function write(array $attributes): void
     {
-        Run::query()->create($attributes + ['scope' => $this->policy->scope()]);
+        Aria::runModel()::query()->create($attributes + ['scope' => $this->policy->scope()]);
     }
 
     /**

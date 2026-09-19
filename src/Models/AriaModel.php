@@ -6,6 +6,7 @@ namespace NoriaLabs\Aria\Models;
 
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
+use NoriaLabs\Aria\Aria;
 
 abstract class AriaModel extends Model
 {
@@ -13,11 +14,16 @@ abstract class AriaModel extends Model
 
     protected $guarded = ['id'];
 
+    /** The unprefixed table name. Aria resolves it to an override or the prefix. */
+    protected string $ariaTable = '';
+
     public function getTable(): string
     {
-        return config('aria.table_prefix', 'aria_').$this->ariaTable;
+        return Aria::table($this->ariaTable);
     }
 
-    /** The unprefixed table name, so a host app can prefix every table at once. */
-    protected string $ariaTable = '';
+    public function getConnectionName(): ?string
+    {
+        return Aria::connection() ?? parent::getConnectionName();
+    }
 }

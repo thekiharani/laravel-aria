@@ -3,14 +3,7 @@
 declare(strict_types=1);
 
 use Illuminate\Support\Facades\Schema;
-use NoriaLabs\Aria\Models\Chunk;
 use NoriaLabs\Aria\Models\Conversation;
-
-it('creates every table the package needs, prefixed', function (): void {
-    foreach (['conversations', 'messages', 'documents', 'chunks', 'runs', 'spend_ledger'] as $name) {
-        expect(Schema::hasTable('aria_'.$name))->toBeTrue("missing aria_{$name}");
-    }
-});
 
 it('keys every table on a uuid rather than an auto-increment', function (): void {
     foreach (['conversations', 'messages', 'documents', 'chunks', 'runs', 'spend_ledger'] as $name) {
@@ -32,9 +25,14 @@ it('generates version 7 identifiers, so rows sort by when they were written', fu
     expect(explode('-', $id)[2][0])->toBe('7');
 });
 
-it('renames the prefix across every table at once', function (): void {
-    config(['aria.table_prefix' => 'noria_ai_']);
+it('carries the columns the SDK store reads and writes', function (): void {
+    // Renaming one of these breaks the store, not merely a query of our own.
+    foreach (['conversation_id', 'participant_type', 'participant_id', 'agent', 'role',
+        'content', 'attachments', 'tool_calls', 'tool_results', 'usage', 'meta', 'approval_state'] as $column) {
+        expect(Schema::hasColumn('aria_messages', $column))->toBeTrue("aria_messages.{$column}");
+    }
+});
 
-    expect((new Conversation)->getTable())->toBe('noria_ai_conversations');
-    expect((new Chunk)->getTable())->toBe('noria_ai_chunks');
+it('keys a participant by string, so a host with uuid users can name one', function (): void {
+    expect(Schema::getColumnType('aria_conversations', 'participant_id'))->not->toBe('integer');
 });

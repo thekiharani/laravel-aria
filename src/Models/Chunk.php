@@ -7,6 +7,7 @@ namespace NoriaLabs\Aria\Models;
 use Illuminate\Database\Eloquent\Casts\AsVector;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Facades\DB;
+use NoriaLabs\Aria\Aria;
 
 /**
  * @property string $content
@@ -35,12 +36,12 @@ class Chunk extends AriaModel
 
     public static function vectorsSupported(): bool
     {
-        return DB::connection()->getDriverName() === 'pgsql';
+        return DB::connection(Aria::connection())->getDriverName() === 'pgsql';
     }
 
     /** @return BelongsTo<Document, $this> */
     public function document(): BelongsTo
     {
-        return $this->belongsTo(Document::class);
+        return $this->belongsTo(Aria::documentModel(), 'document_id');
     }
 }

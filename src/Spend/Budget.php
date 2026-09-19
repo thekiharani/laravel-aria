@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace NoriaLabs\Aria\Spend;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
+use NoriaLabs\Aria\Aria;
 use NoriaLabs\Aria\Contracts\BudgetPolicy;
 use NoriaLabs\Aria\Models\SpendLedger;
 
@@ -51,7 +53,7 @@ class Budget
 
         // The condition travels with the update, so the row is read and written
         // under one lock and two callers cannot both find the same last dollar.
-        return SpendLedger::query()
+        return $this->ledgerQuery()
             ->whereKey($ledger->getKey())
             ->whereRaw('spend_usd_micros + ? <= ?', [$estimate, $cap])
             ->update(['spend_usd_micros' => DB::raw('spend_usd_micros + '.$estimate)]) === 1;
@@ -66,7 +68,7 @@ class Budget
             return;
         }
 
-        SpendLedger::query()
+        $this->ledgerQuery()
             ->whereKey($this->ledger()->getKey())
             // CASE rather than GREATEST: the latter is Postgres and MySQL only,
             // and a package does not choose the host application's database.
@@ -84,7 +86,7 @@ class Budget
             return;
         }
 
-        SpendLedger::query()
+        $this->ledgerQuery()
             ->whereKey($this->ledger()->getKey())
             ->update(['spend_usd_micros' => DB::raw('spend_usd_micros + '.$spend)]);
     }
@@ -121,9 +123,16 @@ class Budget
         return $this->spentThisPeriod() + max($estimateUsdMicros, 0) <= $cap;
     }
 
+    /** @return Builder<SpendLedger> */
+    private function ledgerQuery(): Builder
+    {
+        /** @var Builder<SpendLedger> */
+        return Aria::spendLedgerModel()::query();
+    }
+
     private function ledger(): SpendLedger
     {
-        return SpendLedger::query()->firstOrCreate(
+        return $this->ledgerQuery()->firstOrCreate(
             ['scope' => $this->policy->scope(), 'period' => now()->format('Y-m')],
             ['spend_usd_micros' => 0],
         );
