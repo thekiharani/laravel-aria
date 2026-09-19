@@ -7,30 +7,37 @@ namespace NoriaLabs\Aria\Spend;
 use Laravel\Ai\Events\AgentFailed;
 use Laravel\Ai\Events\AgentPrompted;
 use Laravel\Ai\Events\EmbeddingsGenerated;
+use Laravel\Ai\Prompts\AgentPrompt;
 use NoriaLabs\Aria\Contracts\BudgetPolicy;
 use NoriaLabs\Aria\Models\Run;
 
 /**
- * Every call the SDK makes, written down with what it cost. Listens to the
- * SDK's own events rather than wrapping calls, so a run is recorded whether it
- * went through the Assistant or straight through an agent.
+ * Every call the SDK makes, written down with what it cost.
+ *
+ * The agent, provider and model are on the prompt rather than the event. Read
+ * from the event they come back null, the model prices as '', RunCost charges
+ * the ceiling rate for every call ever made, and the log fills with warnings
+ * about a model nobody named.
  */
 class RecordRun
 {
+    private const ERROR_LIMIT = 1_000;
+
     public function __construct(
         private BudgetPolicy $policy,
         private Budget $budget,
     ) {}
 
+    /** Also the listener for AgentStreamed, which extends AgentPrompted. */
     public function prompted(AgentPrompted $event): void
     {
-        $model = $this->modelOf($event);
         $usage = $event->response->usage;
+        $model = $event->prompt->model;
         $cost = RunCost::of($model, $usage);
 
         $this->write([
-            'agent' => $this->agentOf($event),
-            'provider' => $this->providerOf($event),
+            'agent' => $event->prompt->agent::class,
+            'provider' => $this->providerOf($event->prompt),
             'model' => $model,
             'status' => 'succeeded',
             'prompt_tokens' => $usage->promptTokens,
@@ -44,15 +51,17 @@ class RecordRun
     public function failed(AgentFailed $event): void
     {
         $this->write([
-            'agent' => $this->agentOf($event),
+            'agent' => $event->prompt->agent::class,
+            'provider' => $this->providerOf($event->prompt),
+            'model' => $event->prompt->model,
             'status' => 'failed',
-            'error' => mb_substr($event->exception->getMessage(), 0, 1000),
+            'error' => mb_substr($event->exception->getMessage(), 0, self::ERROR_LIMIT),
         ]);
     }
 
     /**
      * Embeddings report a plain token count rather than a Usage, and only ever
-     * consume input, so the cost is built by hand rather than through RunCost.
+     * consume input, so the cost is built from the count rather than a Usage.
      */
     public function embedded(EmbeddingsGenerated $event): void
     {
@@ -60,7 +69,7 @@ class RecordRun
 
         $this->write([
             'agent' => 'embeddings',
-            'provider' => $this->providerOf($event),
+            'provider' => $event->provider->name(),
             'model' => $event->model,
             'status' => 'succeeded',
             'prompt_tokens' => $event->response->tokens,
@@ -76,29 +85,12 @@ class RecordRun
         Run::query()->create($attributes + ['scope' => $this->policy->scope()]);
     }
 
-    private function agentOf(object $event): ?string
+    /**
+     * The connection name the app configured, not the driver, so two OpenAI
+     * connections pointed at different keys stay apart in the ledger.
+     */
+    private function providerOf(AgentPrompt $prompt): string
     {
-        $agent = $event->agent ?? null;
-
-        return is_object($agent) ? $agent::class : (is_string($agent) ? $agent : null);
-    }
-
-    /** Provider arrives as an enum on some events and a string on others. */
-    private function providerOf(object $event): ?string
-    {
-        $provider = $event->provider ?? null;
-
-        if ($provider instanceof \BackedEnum) {
-            return (string) $provider->value;
-        }
-
-        return is_string($provider) ? $provider : null;
-    }
-
-    private function modelOf(object $event): string
-    {
-        $model = $event->model ?? null;
-
-        return is_string($model) ? $model : '';
+        return $prompt->provider->name();
     }
 }

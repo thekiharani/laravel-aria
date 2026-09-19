@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
 use Laravel\Ai\Events\AgentFailed;
 use Laravel\Ai\Events\AgentPrompted;
+use Laravel\Ai\Events\AgentStreamed;
 use Laravel\Ai\Events\EmbeddingsGenerated;
 use NoriaLabs\Aria\Console\IndexCommand;
 use NoriaLabs\Aria\Contracts\BudgetPolicy;
@@ -62,7 +63,11 @@ class AriaServiceProvider extends ServiceProvider
         }
 
         if (config('aria.record_runs', true)) {
+            // AgentStreamed extends AgentPrompted but is listened for in its
+            // own right: the dispatcher walks interfaces, never parents, so a
+            // listener on the parent alone leaves every streamed turn unbilled.
             Event::listen(AgentPrompted::class, [RecordRun::class, 'prompted']);
+            Event::listen(AgentStreamed::class, [RecordRun::class, 'prompted']);
             Event::listen(AgentFailed::class, [RecordRun::class, 'failed']);
             Event::listen(EmbeddingsGenerated::class, [RecordRun::class, 'embedded']);
         }
