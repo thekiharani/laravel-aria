@@ -8,6 +8,12 @@ return [
 
     'table_prefix' => env('ARIA_TABLE_PREFIX', 'aria_'),
 
+    /*
+     * Set false after publishing the migrations, or every table is created
+     * twice - once from the package path and once from database/migrations.
+     */
+    'load_migrations' => (bool) env('ARIA_LOAD_MIGRATIONS', true),
+
     'embeddings' => [
         'provider' => env('ARIA_EMBEDDINGS_PROVIDER', 'openai'),
         'model' => env('ARIA_EMBEDDINGS_MODEL', 'text-embedding-3-small'),

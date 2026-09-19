@@ -49,12 +49,17 @@ class AriaServiceProvider extends ServiceProvider
                 __DIR__.'/../config/aria.php' => config_path('aria.php'),
             ], 'aria-config');
 
-            $this->publishes([
+            $this->publishesMigrations([
                 __DIR__.'/../database/migrations' => database_path('migrations'),
             ], 'aria-migrations');
         }
 
-        $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
+        // Loaded from the package unless the host published them. Doing both
+        // runs every table twice, which fails on the second CREATE and leaves
+        // a half-migrated database behind.
+        if (config('aria.load_migrations', true)) {
+            $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
+        }
 
         if (config('aria.record_runs', true)) {
             Event::listen(AgentPrompted::class, [RecordRun::class, 'prompted']);

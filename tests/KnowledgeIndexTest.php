@@ -7,6 +7,7 @@ use NoriaLabs\Aria\Knowledge\KnowledgeDocument;
 use NoriaLabs\Aria\Knowledge\KnowledgeIndex;
 use NoriaLabs\Aria\Models\Chunk;
 use NoriaLabs\Aria\Models\Document;
+use NoriaLabs\Aria\Support\Vectors;
 use NoriaLabs\Aria\Tests\Fixtures\StubSource;
 
 function doc(string $key, string $title, string $body): KnowledgeDocument
@@ -23,10 +24,23 @@ function doc(string $key, string $title, string $body): KnowledgeDocument
 beforeEach(function (): void {
     StubSource::$documents = [];
 
-    // No provider is called: every chunk gets a deterministic stub vector, so
-    // these tests exercise the index rather than somebody's embedding model.
+    // No provider is called: every chunk gets a stub vector, so these tests
+    // exercise the index rather than somebody's embedding model.
     Embeddings::fake();
 });
+
+/*
+ * Retrieval behaviour splits by driver. Writing, hashing and de-duplicating
+ * are the same everywhere; matching is not, and a stub vector carries no
+ * meaning to compare against, so the similarity path cannot be asserted
+ * without a real provider. These cover the LIKE fallback and say so.
+ */
+function skipWhereVectorsExist(): void
+{
+    if (Vectors::indexed()) {
+        test()->markTestSkipped('Similarity search needs a real embedding provider to assert.');
+    }
+}
 
 it('writes a document per entry in the source', function (): void {
     StubSource::$documents = [
@@ -68,6 +82,8 @@ it('updates a document in place rather than duplicating it', function (): void {
 });
 
 it('finds a document by its words when there is no vector column', function (): void {
+    skipWhereVectorsExist();
+
     StubSource::$documents = [
         doc('one', 'Reconciliation', 'Matching payments to invoices at month end.'),
         doc('two', 'Discovery', 'A week that produces a fixed price.'),
@@ -89,6 +105,8 @@ it('returns nothing for an empty query rather than everything', function (): voi
 });
 
 it('never returns one document twice, however many chunks matched', function (): void {
+    skipWhereVectorsExist();
+
     StubSource::$documents = [doc('one', 'Long', str_repeat('payments ', 900))];
     app(KnowledgeIndex::class)->rebuild();
 
@@ -97,6 +115,8 @@ it('never returns one document twice, however many chunks matched', function ():
 });
 
 it('reads only its own corpus, so two products can share a database', function (): void {
+    skipWhereVectorsExist();
+
     StubSource::$documents = [doc('mine', 'Mine', 'A reconciliation document.')];
     app(KnowledgeIndex::class)->rebuild();
 

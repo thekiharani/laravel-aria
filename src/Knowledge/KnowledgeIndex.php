@@ -6,12 +6,12 @@ namespace NoriaLabs\Aria\Knowledge;
 
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Config;
-use Illuminate\Support\Facades\DB;
 use Laravel\Ai\Embeddings;
 use NoriaLabs\Aria\Contracts\BudgetPolicy;
 use NoriaLabs\Aria\Contracts\KnowledgeSource;
 use NoriaLabs\Aria\Models\Chunk;
 use NoriaLabs\Aria\Models\Document;
+use NoriaLabs\Aria\Support\Vectors;
 
 class KnowledgeIndex
 {
@@ -270,9 +270,9 @@ class KnowledgeIndex
         return $chunks;
     }
 
-    /** Only pgsql has a vector column; everything else falls back to LIKE. */
+    /** Asks for the column, not the driver: pgvector may not be installed. */
     private function usesVectors(): bool
     {
-        return DB::connection()->getDriverName() === 'pgsql';
+        return Vectors::indexed();
     }
 }

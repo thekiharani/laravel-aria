@@ -124,12 +124,25 @@ it at zero would read as thrift in the ledger while quietly switching every cap 
 
 ## Databases
 
-Vector search runs on PostgreSQL. Everywhere else falls back to a `LIKE` search, the vector column
-is never created, and the cast that reads it is not registered - so tests run on SQLite without a
-vector extension and nothing pretends the results are as good.
+Postgres-first: `jsonb` rather than `json`, UUID v7 keys throughout, `foreignIdFor()` constraints,
+`text` only where the length is genuinely unbounded, and bounded `varchar` everywhere else.
+
+Vector search needs Postgres **and** pgvector. The migration tries `CREATE EXTENSION IF NOT EXISTS
+vector` and, if the extension is not there afterwards, adds no column at all - a managed host that
+will not let you install it still migrates, and retrieval falls back to `LIKE` rather than
+pretending the results are as good. One migration, six tables.
 
 Several products can share one database. Documents and chunks are keyed by corpus, and a search
 only ever reads its own.
+
+### Publishing and overriding
+
+```bash
+php artisan vendor:publish --tag=aria-migrations
+```
+
+Then set `ARIA_LOAD_MIGRATIONS=false`, or every table is created twice - once from the package path
+and once from `database/migrations`. Rename the whole set at once with `ARIA_TABLE_PREFIX`.
 
 ## Testing against it
 

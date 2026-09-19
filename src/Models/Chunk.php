@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace NoriaLabs\Aria\Models;
 
+use Illuminate\Database\Eloquent\Casts\AsVector;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Facades\DB;
 
@@ -26,7 +27,7 @@ class Chunk extends AriaModel
         $casts = ['embedded_at' => 'datetime'];
 
         if (static::vectorsSupported()) {
-            $casts['embedding'] = 'vector';
+            $casts['embedding'] = AsVector::class;
         }
 
         return $casts;
